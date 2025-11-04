@@ -5,40 +5,43 @@ const dotenv = require('dotenv');
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
 const nodemailer = require('nodemailer');
-const path = require('path');
-const fs = require('fs').promises;
 
 dotenv.config();
-
 const app = express();
-app.use(cors());
-app.use(express.json());
 
-//  MongoDB কানেকশন
+// Middleware
+app.use(cors());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// MongoDB
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected'))
-  .catch(err => console.log(err));
+  .catch(err => console.error('MongoDB error:', err));
 
-//  Cloudinary কনফিগারেশন
+// Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Multer সেটআপ (লোকাল স্টোরেজে ফাইল সেভ)
-const upload = multer({ dest: 'uploads/' });
+// Multer: Memory Storage
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
+});
 
-//  Nodemailer Transporter তৈরি
+// Nodemailer
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.EMAIL_USER,  // তোমার ইমেইল
-    pass: process.env.EMAIL_PASS,  // App Password
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
   },
 });
 
-//  MongoDB স্কিমা
+// Schema
 const contactSchema = new mongoose.Schema({
   firstName: String,
   lastName: String,
@@ -49,52 +52,64 @@ const contactSchema = new mongoose.Schema({
 });
 const Contact = mongoose.model('Contact', contactSchema);
 
-//  POST রুট
+// POST Route
 app.post('/api/contact', upload.single('file'), async (req, res) => {
   try {
     const { firstName, lastName, email, subject, message } = req.body;
     let videoUrl = null;
 
-    //  যদি ফাইল থাকে, তাহলে Cloudinary তে আপলোড করো
     if (req.file) {
-      const result = await cloudinary.uploader.upload(req.file.path, {
-        resource_type: 'video',
-        folder: 'videos'
+      const result = await new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          { resource_type: 'video', folder: 'videos' },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          }
+        );
+        uploadStream.end(req.file.buffer);
       });
       videoUrl = result.secure_url;
-      await fs.unlink(req.file.path);
     }
 
-    //  MongoDB তে সেভ করো
-    const newContact = new Contact({
-      firstName, lastName, email, subject, videoUrl, message
-    });
+    const newContact = new Contact({ firstName, lastName, email, subject, videoUrl, message });
     await newContact.save();
 
-    // এখন ইমেইল পাঠাও
     const mailOptions = {
-      from: `"Your Website Contact" <${process.env.EMAIL_USER}>`,
-      to: process.env.EMAIL_USER, // তোমার ইমেইল যেখানে ডেটা যাবে
-      subject: `New Contact Form Submission: ${subject}`,
+      from: `"Contact Form" <${process.env.EMAIL_USER}>`,
+      to: process.env.EMAIL_USER,
+      subject: `New Submission: ${subject}`,
       html: `
-        <h2>New Contact Form Submission</h2>
+        <h2>New Contact</h2>
         <p><strong>Name:</strong> ${firstName} ${lastName}</p>
         <p><strong>Email:</strong> ${email}</p>
         <p><strong>Subject:</strong> ${subject}</p>
-        <p><strong>Message:</strong><br/> ${message}</p>
-        ${videoUrl ? `<p><strong>Video:</strong> <a href="${videoUrl}" target="_blank">Watch Video</a></p>` : ''}
+        <p><strong>Message:</strong><br/>${message}</p>
+        ${videoUrl ? `<p><strong>Video:</strong> <a href="${videoUrl}">Watch</a></p>` : ''}
       `,
     };
-
     await transporter.sendMail(mailOptions);
 
-    //  Success Response পাঠাও
-    res.status(200).json({ message: 'Form submitted successfully!', videoUrl });
+    res.status(200).json({ message: 'Success!', videoUrl });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error submitting form' });
+    console.error('Error:', error);
+    res.status(500).json({ error: error.message || 'Server error' });
   }
 });
 
-const PORT = process.env.PORT || 5004;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// GET Route
+app.get('/', (req, res) => {
+  res.json({ message: 'API is live! Use POST /api/contact' });
+});
+
+// Vercel-এর জন্য
+module.exports = app;
+
+// লোকালে চালানোর জন্য
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Test: http://localhost:${PORT}/api/contact`);
+  });
+}
