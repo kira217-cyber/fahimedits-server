@@ -19,22 +19,22 @@ app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
-// MongoDB Connection
+// MongoDB
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected'))
   .catch(err => console.error('MongoDB Error:', err));
 
-// Cloudinary Config
+// Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Multer: /tmp (Vercel) | uploads/ (Local)
+// Multer: Vercel-এ /tmp, Local-এ uploads/
 const upload = multer({
-  dest: isVercel ? '/tmp' : 'uploads/',
-  limits: { fileSize: 75 * 1024 * 1024 }, // 75MB
+  dest: isVercel ? '/tmp' : 'uploads/',  // এটাই মূল ফিক্স
+  limits: { fileSize: 75 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('video/')) cb(null, true);
     else cb(new Error('Only video files allowed!'), false);
@@ -44,10 +44,7 @@ const upload = multer({
 // Nodemailer
 const transporter = nodemailer.createTransport({
   service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
+  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
 });
 
 // Schema
@@ -97,12 +94,11 @@ app.post('/api/contact', upload.single('file'), async (req, res) => {
       to: process.env.EMAIL_USER,
       subject: `New: ${subject}`,
       html: `
-        <h2>New Contact Form</h2>
+        <h2>New Contact</h2>
         <p><strong>Name:</strong> ${firstName} ${lastName}</p>
         <p><strong>Email:</strong> ${email}</p>
-        <p><strong>Subject:</strong> ${subject}</p>
         <p><strong>Message:</strong><br>${message.replace(/\n/g, '<br>')}</p>
-        ${videoUrl ? `<p><strong>Video:</strong> <a href="${videoUrl}">Watch Video</a></p>` : ''}
+        ${videoUrl ? `<p><strong>Video:</strong> <a href="${videoUrl}">Watch</a></p>` : ''}
       `,
     });
 
@@ -125,11 +121,11 @@ app.post('/api/contact', upload.single('file'), async (req, res) => {
   }
 });
 
-// Local Server Only
+// Local Server
 if (!isVercel) {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
-    console.log(`Local Server: http://localhost:${PORT}`);
+    console.log(`Local: http://localhost:${PORT}`);
   });
 }
 
