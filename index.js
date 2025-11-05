@@ -3,36 +3,33 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
-const cloudinary = require("cloudinary").v2;
 const nodemailer = require("nodemailer");
 
 dotenv.config();
 
 const app = express();
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-}));
+
+// ✅ Middleware
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "OPTIONS"],
+  })
+);
 app.use(express.json());
 
 // ✅ MongoDB Connection
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB Connected"))
-  .catch((err) => console.error("❌ MongoDB Error:", err));
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log("MongoDB Connected"))
+  .catch((err) => console.error("MongoDB Error:", err));
 
-// ✅ Cloudinary Config
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-// ✅ Nodemailer Setup
+// ✅ Nodemailer Setup (Gmail)
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS, // App password (Google App Password)
+    pass: process.env.EMAIL_PASS, // Google App Password
   },
 });
 
@@ -42,7 +39,6 @@ const contactSchema = new mongoose.Schema({
   lastName: String,
   email: String,
   subject: String,
-  videoUrl: String,
   message: String,
 });
 const Contact = mongoose.model("Contact", contactSchema);
@@ -51,77 +47,59 @@ const Contact = mongoose.model("Contact", contactSchema);
 app.get("/", (req, res) => {
   res.send(`
     <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
-      <h1>🚀 Express Server Running on Vercel!</h1>
-      <p>Environment: <strong>${process.env.NODE_ENV}</strong></p>
+      <h1>Express Server Running!</h1>
       <p>Use <code>POST /api/contact</code> to submit form.</p>
-      <p>Use <code>GET /api/signature</code> for Cloudinary upload signature.</p>
+      <p>Local: http://localhost:3000</p>
+      <p>Vercel: https://your-project.vercel.app</p>
     </div>
   `);
 });
 
-
-// ✅ 1️⃣ Cloudinary Signature Route (for client-side large file upload)
-app.get("/api/signature", (req, res) => {
-  try {
-    const timestamp = Math.round(new Date().getTime() / 1000);
-    const signature = cloudinary.utils.api_sign_request(
-      { timestamp, folder: "videos" },
-      process.env.CLOUDINARY_API_SECRET
-    );
-
-    res.json({
-      timestamp,
-      signature,
-      cloudName: process.env.CLOUDINARY_CLOUD_NAME,
-      apiKey: process.env.CLOUDINARY_API_KEY,
-    });
-  } catch (error) {
-    console.error("❌ Signature Error:", error);
-    res.status(500).json({ error: "Failed to generate signature" });
-  }
-});
-
-
-// ✅ 2️⃣ Contact Form Route (receive form data only)
+// ✅ Contact Form Route
 app.post("/api/contact", async (req, res) => {
   try {
-    const { firstName, lastName, email, subject, message, videoUrl } = req.body;
+    const { firstName, lastName, email, subject, message } = req.body;
 
-    // ⬆️ Save to MongoDB
+    // Save to MongoDB
     const newContact = new Contact({
       firstName,
       lastName,
       email,
       subject,
-      videoUrl,
       message,
     });
     await newContact.save();
 
-    // ⬆️ Send Email Notification
+    // Send Email
     const mailOptions = {
-      from: `"Website Contact" <${process.env.EMAIL_USER}>`,
+      from: `"Contact Form" <${process.env.EMAIL_USER}>`,
       to: process.env.EMAIL_USER,
-      subject: `New Contact: ${subject}`,
+      subject: `New Message: ${subject}`,
       html: `
-        <h2>New Contact Form Submission</h2>
+        <h2>New message arrived!</h2>
         <p><strong>Name:</strong> ${firstName} ${lastName}</p>
         <p><strong>Email:</strong> ${email}</p>
         <p><strong>Subject:</strong> ${subject}</p>
-        <p><strong>Message:</strong><br/> ${message}</p>
-        ${videoUrl ? `<p><strong>Video:</strong> <a href="${videoUrl}" target="_blank">Watch</a></p>` : ""}
+        <p><strong>Message:</strong><br/>${message.replace(/\n/g, "<br/>")}</p>
       `,
     };
 
     await transporter.sendMail(mailOptions);
 
-    res.status(200).json({ message: "Form submitted successfully!", videoUrl });
+    res.status(200).json({ message: "Message Send Successfully" });
   } catch (error) {
-    console.error("❌ Error submitting form:", error);
-    res.status(500).json({ error: "Error submitting form", details: error.message });
+    console.error("Error:", error);
+    res.status(500).json({ error: "Message Send Error!" });
   }
 });
 
-
-// ✅ Export for Vercel
+// ✅ Vercel Export (মূল জিনিস)
 module.exports = app;
+
+// ✅ শুধু লোকালে চালানোর জন্য (Vercel-এ কাজ করবে না)
+const PORT = process.env.PORT || 3000;
+if (process.env.NODE_ENV !== "production") {
+  app.listen(PORT, () => {
+    console.log(`Local Server Running on http://localhost:${PORT}`);
+  });
+}
