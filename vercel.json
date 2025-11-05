@@ -8,18 +8,14 @@
   },
   "builds": [
     {
-      "src": "api/index.js",
+      "src": "index.js",
       "use": "@vercel/node"
     }
   ],
   "routes": [
     {
-      "src": "/api/contact",
-      "dest": "/api/index.js"
-    },
-    {
-      "src": "/",
-      "dest": "/api/index.js"
+      "src": "/(.*)",
+      "dest": "/index.js"
     }
   ]
 }
