@@ -1,3 +1,4 @@
+// index.js
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -10,7 +11,10 @@ const fs = require('fs').promises;
 dotenv.config();
 const app = express();
 
-// CORS & Body Parser (with 100MB limit)
+// Vercel Detection
+const isVercel = !!process.env.VERCEL;
+
+// Middleware
 app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
@@ -27,22 +31,17 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Multer Setup (75MB limit + video only)
+// Multer: /tmp (Vercel) | uploads/ (Local)
 const upload = multer({
-  dest: 'uploads/', // লোকালে 'uploads' ফোল্ডার
-  limits: {
-    fileSize: 75 * 1024 * 1024, // 75 MB
-  },
+  dest: isVercel ? '/tmp' : 'uploads/',
+  limits: { fileSize: 75 * 1024 * 1024 }, // 75MB
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('video/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only video files are allowed!'), false);
-    }
+    if (file.mimetype.startsWith('video/')) cb(null, true);
+    else cb(new Error('Only video files allowed!'), false);
   },
 });
 
-// Nodemailer Setup
+// Nodemailer
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -51,7 +50,7 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// MongoDB Schema
+// Schema
 const contactSchema = new mongoose.Schema({
   firstName: String,
   lastName: String,
@@ -61,30 +60,24 @@ const contactSchema = new mongoose.Schema({
   message: String,
   createdAt: { type: Date, default: Date.now },
 });
-
 const Contact = mongoose.model('Contact', contactSchema);
 
-// Default Route
+// Routes
 app.get('/', (req, res) => {
-  res.send(`
-    <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
-      <h1 style="color: green;">Express Server Running Locally!</h1>
-      <p>POST to <code>/api/contact</code> to test</p>
-      <p><strong>Max Video:</strong> 75MB</p>
-    </div>
-  `);
+  res.json({ message: 'API Running', maxVideo: '75MB' });
 });
 
-// Contact Form Route
 app.post('/api/contact', upload.single('file'), async (req, res) => {
+  let tempFilePath = null;
   try {
     const { firstName, lastName, email, subject, message } = req.body;
     let videoUrl = null;
 
     if (req.file) {
-      console.log(`Uploading: ${req.file.originalname} (${req.file.size} bytes)`);
+      tempFilePath = req.file.path;
+      console.log('Uploading:', req.file.originalname);
 
-      const result = await cloudinary.uploader.upload(req.file.path, {
+      const result = await cloudinary.uploader.upload(tempFilePath, {
         resource_type: 'video',
         folder: 'contact-videos',
         timeout: 120000,
@@ -93,53 +86,52 @@ app.post('/api/contact', upload.single('file'), async (req, res) => {
 
       videoUrl = result.secure_url;
       console.log('Uploaded:', videoUrl);
-
-      // Delete local file
-      await fs.unlink(req.file.path).catch(() => {});
     }
 
     // Save to DB
-    const newContact = new Contact({
-      firstName, lastName, email, subject, videoUrl, message
-    });
-    await newContact.save();
+    await new Contact({ firstName, lastName, email, subject, videoUrl, message }).save();
 
     // Send Email
-    const mailOptions = {
-      from: `"Contact Form" <${process.env.EMAIL_USER}>`,
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
       to: process.env.EMAIL_USER,
       subject: `New: ${subject}`,
       html: `
-        <h2>New Submission</h2>
+        <h2>New Contact Form</h2>
         <p><strong>Name:</strong> ${firstName} ${lastName}</p>
         <p><strong>Email:</strong> ${email}</p>
         <p><strong>Subject:</strong> ${subject}</p>
         <p><strong>Message:</strong><br>${message.replace(/\n/g, '<br>')}</p>
-        ${videoUrl ? `<p><strong>Video:</strong> <a href="${videoUrl}">Watch</a></p>` : ''}
+        ${videoUrl ? `<p><strong>Video:</strong> <a href="${videoUrl}">Watch Video</a></p>` : ''}
       `,
-    };
-
-    await transporter.sendMail(mailOptions);
+    });
 
     res.json({ message: 'Success!', videoUrl });
 
   } catch (error) {
     console.error('Error:', error.message);
-
     if (error.message.includes('File too large')) {
       return res.status(400).json({ error: 'Max 75MB allowed.' });
     }
-
     res.status(500).json({ error: 'Server error', details: error.message });
+  } finally {
+    if (tempFilePath && isVercel) {
+      try {
+        await fs.unlink(tempFilePath);
+      } catch (err) {
+        console.warn('Cleanup failed:', err.message);
+      }
+    }
   }
 });
 
-// LOCAL SERVER START (শুধু লোকালে)
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`Test: http://localhost:${PORT}/api/contact (POST)`);
-});
+// Local Server Only
+if (!isVercel) {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`Local Server: http://localhost:${PORT}`);
+  });
+}
 
-// Export for Vercel (শুধু Vercel-এ কাজ করবে)
+// Export for Vercel
 module.exports = app;
