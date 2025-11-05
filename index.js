@@ -31,9 +31,9 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Multer: Vercel-এ /tmp, Local-এ uploads/
+// Multer: Vercel = /tmp, Local = uploads/
 const upload = multer({
-  dest: isVercel ? '/tmp' : 'uploads/',  // এটাই মূল ফিক্স
+  dest: isVercel ? '/tmp' : 'uploads/',
   limits: { fileSize: 75 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('video/')) cb(null, true);
@@ -61,7 +61,7 @@ const Contact = mongoose.model('Contact', contactSchema);
 
 // Routes
 app.get('/', (req, res) => {
-  res.json({ message: 'API Running', maxVideo: '75MB' });
+  res.json({ message: 'API Running', maxVideo: '75MB', vercel: isVercel });
 });
 
 app.post('/api/contact', upload.single('file'), async (req, res) => {
